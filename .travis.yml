@@ -1,18 +1,41 @@
 sudo: required
 dist: trusty
-language: generic
+language: python
 services:
   - docker
 
-cache:
-  directories:
-    - ~/.cache/pip
+
+env:
+  global:
+    - ROCKSDB_COMMIT=479c566771d6464785f205a368701c689e094fe5
+    - TWINE_USERNAME=bauerj
+    - CIBW_MANYLINUX1_X86_64_IMAGE="quay.io/pypa/manylinux2010_x86_64"
+    - CIBW_MANYLINUX1_I686_IMAGE="quay.io/pypa/manylinux2010_i686"
+    - CIBW_TEST_COMMAND="rm {project}/rocksdb/tests/__init__.py;  pytest {project}/rocksdb/tests"
+    - CIBW_TEST_REQUIRES=".[test]"
+    - CIBW_BUILD=*-manylinux1_x86_64
 
 install:
-      docker build . -t ci-image;
+  - pip install cibuildwheel==0.11.1
+  - pip install twine
 script:
-      docker run -v ~/.cache/pip:/home/tester/.cache/pip -v $(pwd):/home/tester/src ci-image:latest tox -e ${TOXENV} ;
-env:
-      - TOXENV=py27
-      - TOXENV=py36
-      - TOXENV=docs
+  - |
+    export CIBW_BEFORE_BUILD="
+    if [ ! -d "/tmp/rocksdb" ]; then
+     yum install -y snappy snappy-devel zlib zlib-devel bzip2 bzip2-devel lz4-devel
+     pushd /tmp
+     git clone https://github.com/facebook/rocksdb
+     cd rocksdb
+     git reset --hard $ROCKSDB_COMMIT
+     CXXFLAGS='-flto -Os -s' PORTABLE=1 make shared_lib -j 6 
+     make install-shared
+     popd
+    fi
+    "
+  - cibuildwheel --output-dir wheelhouse
+  - ls -la wheelhouse
+  - |
+    if [[ $TRAVIS_TAG ]]; then
+      python -m pip install twine
+      python -m twine upload wheelhouse/*.whl
+    fi
